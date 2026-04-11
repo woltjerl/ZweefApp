@@ -1,0 +1,27 @@
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Database
+sqlite3  # Built-in with Python
+
+# Weather data
+meteostat>=1.6.0
+
+# Web requests
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Visualization
+folium>=0.14.0
+matplotlib>=3.7.0
+
+# Progress bars
+tqdm>=4.65.0
+
+# IGC file parsing (if needed)
+# aerofiles>=1.0.0
+
+# Development
+# pytest>=7.3.0
+# black>=23.0.0
