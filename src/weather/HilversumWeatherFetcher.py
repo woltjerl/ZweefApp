@@ -22,7 +22,8 @@ Dependencies:
 import math
 import time
 import logging
-from datetime import datetime, timedelta
+import requests
+from datetime import datetime, date as date_type, timedelta
 from typing import Optional, List, Dict, Any
 from meteostat import Point, stations, hourly
 
@@ -174,6 +175,74 @@ class HilversumWeatherFetcher:
             })
         return weather_data
 
+    def _fetch_from_open_meteo(self, target_date: date_type) -> List[Dict[str, Any]]:
+        """Fetch weather from Open-Meteo archive/forecast as fallback when Meteostat has no data."""
+        today = date_type.today()
+        days_diff = (today - target_date).days
+
+        if days_diff > 7:
+            url = 'https://archive-api.open-meteo.com/v1/archive'
+            params = {
+                'latitude': 52.191,
+                'longitude': 5.146,
+                'hourly': 'temperature_2m,wind_speed_10m,wind_direction_10m,relative_humidity_2m,surface_pressure,precipitation,weather_code,wind_gusts_10m',
+                'start_date': str(target_date),
+                'end_date': str(target_date),
+                'timezone': 'Europe/Amsterdam',
+            }
+        else:
+            url = 'https://api.open-meteo.com/v1/forecast'
+            params = {
+                'latitude': 52.191,
+                'longitude': 5.146,
+                'hourly': 'temperature_2m,wind_speed_10m,wind_direction_10m,relative_humidity_2m,surface_pressure,precipitation,weather_code,wind_gusts_10m',
+                'past_days': 7,
+                'forecast_days': 7,
+                'timezone': 'Europe/Amsterdam',
+            }
+
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            self.logger.error(f"Open-Meteo request failed: {e}")
+            return []
+
+        h = data.get('hourly', {})
+        if not h:
+            return []
+
+        target_str = str(target_date)
+        weather_data = []
+        for i, ts in enumerate(h.get('time', [])):
+            if not ts.startswith(target_str):
+                continue
+            temp = h['temperature_2m'][i]
+            rhum = h['relative_humidity_2m'][i] if 'relative_humidity_2m' in h else None
+            dwpt = self._calculate_dew_point(temp, rhum)
+            weather_data.append({
+                "time": ts + ":00" if len(ts) == 13 else ts,
+                "temp": temp,
+                "dwpt": dwpt,
+                "rhum": rhum,
+                "prcp": h.get('precipitation', [None] * len(h['time']))[i],
+                "snow": None,
+                "wdir": h.get('wind_direction_10m', [None] * len(h['time']))[i],
+                "wspd": h.get('wind_speed_10m', [None] * len(h['time']))[i],
+                "wpgt": h.get('wind_gusts_10m', [None] * len(h['time']))[i],
+                "pres": h.get('surface_pressure', [None] * len(h['time']))[i],
+                "tsun": None,
+                "coco": h.get('weather_code', [None] * len(h['time']))[i],
+            })
+
+        if weather_data:
+            self.logger.info(f"Open-Meteo returned {len(weather_data)} records for {target_date}")
+        else:
+            self.logger.warning(f"Open-Meteo returned no data for {target_date}")
+
+        return weather_data
+
     def fetch_wind(
         self,
         date,
@@ -221,16 +290,14 @@ class HilversumWeatherFetcher:
                     f"(attempt {attempt}/{max_retries})"
                 )
 
-                # Note: meteostat doesn't directly support timeout parameter
-                # but we wrap in try/except to handle network issues
                 data = hourly(self.station_id, day_start, day_end)
                 df = data.fetch()
 
-                if df.empty:
+                if df is None or df.empty:
                     self.logger.warning(
-                        f"No weather data returned for {day_start.date()}"
+                        f"No Meteostat data for {day_start.date()}, trying Open-Meteo"
                     )
-                    return []
+                    return self._fetch_from_open_meteo(day_start.date())
 
                 weather_data = self._parse_weather_dataframe(df)
                 self.logger.info(
