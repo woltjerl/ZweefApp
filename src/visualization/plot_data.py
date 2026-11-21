@@ -2,6 +2,10 @@ import sqlite3
 import math
 import pandas as pd
 import folium
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '.'))
+from basemap import make_map  # noqa: E402  (keyless PDOK base map)
 from folium.plugins import HeatMap
 import datetime
 
@@ -68,7 +72,7 @@ df_filtered = df_filtered[df_filtered['time'].apply(is_morning)]
 heat_data = df_filtered[['latitude', 'longitude']].values.tolist()
 
 # Create a folium map centered at the specified coordinates.
-m = folium.Map(location=[center_lat, center_lon], zoom_start=13)
+m = make_map(location=[center_lat, center_lon], zoom_start=13)
 
 # Add a heatmap layer.
 HeatMap(heat_data, radius=5, blur=3, min_opacity=0.4).add_to(m)

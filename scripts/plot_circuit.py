@@ -19,6 +19,10 @@ import os
 from colorsys import hsv_to_rgb
 
 import folium
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '../src/visualization'))
+from basemap import make_map  # noqa: E402  (keyless PDOK base map)
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'visualization'))
@@ -196,10 +200,9 @@ def draw_all_runways(m, active_runway):
 
 def create_circuit_map(flights, median_track, runway, output_path):
     """Create a Folium map with circuit tracks and median overlay."""
-    m = folium.Map(
+    m = make_map(
         location=[AIRPORT_LAT, AIRPORT_LON],
         zoom_start=14,
-        tiles='OpenStreetMap',
     )
 
     draw_all_runways(m, runway)

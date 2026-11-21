@@ -21,6 +21,10 @@ import os
 from datetime import datetime, date, timedelta
 from typing import Dict, List, Tuple, Optional
 import folium
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '../visualization'))
+from basemap import make_map  # noqa: E402  (keyless PDOK base map)
 from folium.plugins import HeatMap
 import pandas as pd
 
@@ -269,7 +273,7 @@ class ThermalPredictor:
         print(f"  Identified {len(hotspots)} thermal hotspots")
 
         # Create map
-        m = folium.Map(location=[EHHV_LAT, EHHV_LON], zoom_start=12)
+        m = make_map(location=[EHHV_LAT, EHHV_LON], zoom_start=12)
 
         # Add heatmap of thermal points
         heat_data = [[row['latitude'], row['longitude'], 1.0] for _, row in df.iterrows()]

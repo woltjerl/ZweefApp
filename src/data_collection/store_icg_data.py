@@ -278,6 +278,9 @@ def create_tables(conn: sqlite3.Connection):
         )
     """)
 
+    # Fast per-flight lookups (detector, late-track check)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_igc_flight ON igc_data(flight_id)")
+
     conn.commit()
 
 
@@ -603,10 +606,19 @@ def process_flight(
     # Check if the flight is already in the database.
     flight_id = flight.get("id")
     c.execute("SELECT id FROM flights WHERE id = ?", (flight_id,))
-    if c.fetchone() is not None:
-        logger.debug(f"Flight {flight_id} already exists, skipping")
-        stats.flights_skipped += 1
-        return False
+    exists = c.fetchone() is not None
+    if exists:
+        # A logger file uploaded after the flight was first stored: add its fixes now.
+        igc_field = flight.get("igc")
+        igc_path = os.path.join(directory_path, os.path.basename(igc_field)) if igc_field else None
+        late_track = (igc_path is not None and os.path.exists(igc_path) and
+                      c.execute("SELECT 1 FROM igc_data WHERE flight_id = ? LIMIT 1", (flight_id,)).fetchone() is None)
+        if not late_track:
+            logger.debug(f"Flight {flight_id} already exists, skipping")
+            stats.flights_skipped += 1
+            return False
+        logger.info(f"Flight {flight_id}: adding logger track that arrived after the flight was stored")
+        c.execute("UPDATE flights SET igc = ? WHERE id = ?", (igc_field, flight_id))
 
     try:
         # Fields to extract from the JSON record.
@@ -622,7 +634,8 @@ def process_flight(
         flight_values = [convert_value(flight.get(field)) for field in fields]
         placeholders = ",".join(["?"] * len(fields))
         sql = f"INSERT INTO flights ({','.join(fields)}) VALUES ({placeholders})"
-        c.execute(sql, flight_values)
+        if not exists:
+            c.execute(sql, flight_values)
 
         # Use the flight JSON "id" as flight_id.
         flight_db_id = flight.get("id")

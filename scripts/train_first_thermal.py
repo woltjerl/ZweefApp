@@ -3,7 +3,8 @@
 Rebuild everything the first-thermal forecast needs, in order:
 
   1. convection weather backfill (incremental)
-  2. climb detector (incremental; full rebuild when detector settings change)
+  2. climb detector (incremental; full rebuild when detector settings change), then write
+     its results into the old label columns (flights.flight_outcome, igc_data.first_thermal, …)
   3. layer A (connect probability; writes out-of-fold pA per launch)
   4. layer B artefact (per-cell rates; uses data/models/tuned_params.json if present)
   5. layer C (pilot skill, ace routes)
@@ -45,6 +46,8 @@ def main():
     if args.force_detector:
         det.append('--force')
     ok &= step('Climb detector', det)
+    ok &= step('Old label columns ← climb detector', ['-m', 'src.thermal_detection.sync_legacy_columns',
+                                                      '--db', args.db_path])
     ok &= step('Layer A: chance to connect', ['-m', 'src.prediction.layer_a', '--db', args.db_path])
     ok &= step('Layer B: per-cell rates', ['-m', 'src.prediction.layer_b', '--db', args.db_path])
     ok &= step('Layer C: pilot skill and routes', ['-m', 'src.prediction.layer_c', '--db', args.db_path])

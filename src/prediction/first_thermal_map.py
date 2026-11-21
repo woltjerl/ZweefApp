@@ -25,6 +25,7 @@ from src.prediction.features import build_features, weather_frame
 from src.prediction.reach import reach
 
 sys.path.insert(0, str(C.ROOT / 'src' / 'visualization'))
+from basemap import make_map  # noqa: E402  (src/visualization is on sys.path)
 
 WINDOWS_LOCAL = {'morning': (9, 12), 'midday': (12, 15), 'afternoon': (15, 18)}
 SECTORS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
@@ -85,7 +86,7 @@ def _load_json(path):
 
 
 def build_forecast(conn, day: date, window: str = 'midday', runway: str = None, glider: str = 'single',
-                   dual: int = 0, weather_rows=None):
+                   dual: int = 0, weather_rows=None, exclude_day: bool = False):
     """Run the whole prediction for one date/window. Returns a dict used by render_map/log_forecast."""
     from src.weather.open_meteo_forecast import fetch_convection_forecast
 
@@ -121,7 +122,8 @@ def build_forecast(conn, day: date, window: str = 'midday', runway: str = None, 
     # layer B
     P, params = B.load()
     g = P.grid
-    train = np.ones(len(P.T), bool)
+    # exclude_day: leave the day itself out of the history (for examples on past days)
+    train = (P.T.datum.to_numpy() != str(day)) if exclude_day else np.ones(len(P.T), bool)
     target = {'dir': float(f_mid.w100_dir), 'spd': float(f_mid.w100_spd),
               'hour': t_mid.hour + t_mid.minute / 60, 'season': C.season_of(day.month)}
     fitted = B.fit(P, train, target, params)
@@ -245,7 +247,7 @@ def render_map(fc: dict, output_file: str):
     g = fc['grid']
     fit = fc['fitted']
     full = fc['acceptance'].get('decision') == 'full'
-    m = folium.Map(location=[C.LAT0, C.LON0], zoom_start=14, control_scale=True)
+    m = make_map(location=[C.LAT0, C.LON0], zoom_start=14, control_scale=True)
 
     # reach outline
     reach_fg = folium.FeatureGroup(name='Reach (searchable with circuit height left)')

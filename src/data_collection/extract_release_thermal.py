@@ -386,7 +386,15 @@ def main():
     parser.add_argument('--force', '-f', action='store_true', help='Reprocess all flights')
     parser.add_argument('--dry-run', action='store_true', help='Show stats without writing')
     parser.add_argument('--db-path', default='data/flights.db', help='Path to database')
+    parser.add_argument('--legacy-overwrite', action='store_true',
+                        help='overwrite the climb-detector labels with this old detector')
     args = parser.parse_args()
+
+    if not args.legacy_overwrite:
+        print("This old detector is superseded by src/thermal_detection/climb_detector.py, which also\n"
+              "writes these columns (via sync_legacy_columns). Running it would overwrite the corrected\n"
+              "labels with the old ones. Use --legacy-overwrite if you really want that.")
+        exit(1)
 
     extractor = ReleaseToThermalExtractor(db_path=args.db_path)
     extractor.run(force=args.force, dry_run=args.dry_run)

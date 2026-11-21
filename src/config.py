@@ -8,6 +8,7 @@ See docs/FIRST_THERMAL_PLAN.md, section 8.
 import hashlib
 import json
 import math
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -16,9 +17,12 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 # ── Paths ──
+# The ZWEEF_* environment variables let the hosted briefing job (cloud/job.py) run from a
+# downloaded history pack instead of the full database; they must be set before import.
 ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = ROOT / 'data' / 'flights.db'
-MODEL_DIR = ROOT / 'data' / 'models'
+DB_PATH = Path(os.environ.get('ZWEEF_DB', ROOT / 'data' / 'flights.db'))
+MODEL_DIR = Path(os.environ.get('ZWEEF_MODEL_DIR', ROOT / 'data' / 'models'))
+AIRSPACE_FILE = Path(os.environ.get('ZWEEF_AIRSPACE', ROOT / 'data' / 'airspace' / 'NL-ASP.txt'))
 OUTPUT_DIR = ROOT / 'output'
 FORECAST_LOG = ROOT / 'data' / 'forecast_log.jsonl'
 

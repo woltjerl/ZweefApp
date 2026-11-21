@@ -77,7 +77,9 @@ def main():
     args = p.parse_args()
 
     db = Path(args.db_path)
-    end = date.fromisoformat(args.to_date) if args.to_date else date.today() - timedelta(days=1)
+    # up to today, so launches flown today get weather features; the next run re-fetches the
+    # last five days, replacing today's provisional values
+    end = date.fromisoformat(args.to_date) if args.to_date else date.today()
     if args.from_date:
         start = date.fromisoformat(args.from_date)
     else:

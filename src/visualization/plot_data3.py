@@ -1,6 +1,10 @@
 import sqlite3
 import pandas as pd
 import folium
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '.'))
+from basemap import make_map  # noqa: E402  (keyless PDOK base map)
 from folium.plugins import HeatMap
 
 # ----------------------------
@@ -71,7 +75,7 @@ print("Number of unique flight_id in final df_igc:", df_igc['flight_id'].nunique
 # Center the map on EHHV (approximate coordinates)
 center_lat = 52.1932
 center_lon = 5.1528
-m = folium.Map(location=[center_lat, center_lon], zoom_start=14)
+m = make_map(location=[center_lat, center_lon], zoom_start=14)
 
 # Prepare heatmap data (list of [latitude, longitude] pairs)
 heat_data = df_igc[['latitude', 'longitude']].values.tolist()

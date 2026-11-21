@@ -22,6 +22,10 @@ import sys
 from typing import Optional
 
 import folium
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '.'))
+from basemap import make_map  # noqa: E402  (keyless PDOK base map)
 from folium.plugins import HeatMap
 import pandas as pd
 
@@ -77,7 +81,7 @@ def fetch_data(db_path, runway=None, wind_dir=None, wind_tolerance=30):
 def create_map(df, output_file, runway=None, wind_dir=None):
     """Create interactive release-to-thermal visualization."""
 
-    m = folium.Map(location=[AIRPORT_LAT, AIRPORT_LON], zoom_start=14)
+    m = make_map(location=[AIRPORT_LAT, AIRPORT_LON], zoom_start=14)
 
     # Separate thermal found vs landed back
     found = df[df['flight_outcome'] == 'thermal_found']

@@ -19,6 +19,10 @@ import sys
 from datetime import date, datetime, timedelta
 
 import folium
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '../visualization'))
+from basemap import make_map  # noqa: E402  (keyless PDOK base map)
 import numpy as np
 
 # Add paths for imports
@@ -85,7 +89,7 @@ def create_ml_prediction_map(
     print(f"  Note: For spatial visualization, see wind-filtered heatmap")
 
     # ── Create map ──
-    m = folium.Map(location=[AIRPORT_LAT, AIRPORT_LON], zoom_start=14)
+    m = make_map(location=[AIRPORT_LAT, AIRPORT_LON], zoom_start=14)
 
     # Grid probability overlay
     pred_cell_m = 50  # prediction resolution

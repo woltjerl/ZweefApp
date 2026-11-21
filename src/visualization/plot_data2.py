@@ -2,6 +2,10 @@ import sqlite3
 import pandas as pd
 import numpy as np
 import folium
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '.'))
+from basemap import make_map  # noqa: E402  (keyless PDOK base map)
 import branca.colormap as cm
 
 # ----------------------------
@@ -72,7 +76,7 @@ cell_stats = cell_stats[cell_stats['total'] > 30]
 # 6. Draw All Grid Cells on a Folium Map with Colors Indicating the Percentage
 # -----------------------------------------------------------
 # Create a folium map centered on EHHV
-m = folium.Map(location=[center_lat, center_lon], zoom_start=14)
+m = make_map(location=[center_lat, center_lon], zoom_start=14)
 
 # Create a linear colormap for percentage values:
 # green = low percentage, red = high percentage.

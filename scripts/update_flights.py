@@ -5,15 +5,22 @@ Update Flight Database
 Fetches new flights from GlidingApp, stores them in the database,
 and runs all processing steps:
   1. Fetch IGC files from GlidingApp API
-  2. Store flights and GPS data in SQLite database
-  3. Thermal detection (winch release + first thermal)
-  4. Runway detection (from GPS takeoff track)
-  5. Release-to-thermal extraction (bearing, distance, time from release to thermal)
-  6. Weather data update (fetches weather for date range, even if no flights)
-  7. First-thermal pipeline: convection weather, climb detector, layers A/B/C
-     (scripts/train_first_thermal.py; skip with --skip-models)
+  2. Store flights and GPS data in SQLite database (day folders in the fetch range are
+     re-checked, so flights added later to a day and logger files uploaded after the
+     flight was first stored are picked up)
+  3. Runway detection (from GPS takeoff track)
+  4. Weather data update (fetches weather for date range, even if no flights)
+  5. First-thermal pipeline (scripts/train_first_thermal.py; skip with --skip-models):
+     convection weather, climb detector (launches, climbs, search tracks; also writes
+     flights.flight_outcome / release_* / thermal_entry_* and igc_data.first_thermal),
+     layers A/B/C
+  6. Optional: publish the history pack for the hosted briefing (--publish-pack gs://…/pack,
+     or set ZWEEF_PACK_URI; see cloud/README.md)
 
-By default, steps 3-5 only process new/unprocessed flights.
+The old thermal detection (FindThermals_improved.py) and release-to-thermal extraction
+(extract_release_thermal.py) are replaced by the climb detector in step 5.
+
+By default, steps 3 and 5 only process new flights.
 Use --force to recalculate all flights.
 
 Usage:
@@ -23,6 +30,7 @@ Usage:
     python scripts/update_flights.py --force            # recalculate all derived data
 """
 
+import os
 import subprocess
 import sqlite3
 import argparse
@@ -41,6 +49,21 @@ def get_last_flight_date(db_path: str) -> date:
     return date(2024, 1, 1)
 
 
+def reopen_folders(db_path: str, date_from: str, date_to: str) -> int:
+    """Remove processing_log entries for day folders in the range so --resume processes them again."""
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            "DELETE FROM processing_log WHERE substr(folder_name, 1, 10) BETWEEN ? AND ?",
+            (date_from, date_to))
+        conn.commit()
+        return cur.rowcount
+    except sqlite3.OperationalError:
+        return 0          # no processing_log yet
+    finally:
+        conn.close()
+
+
 def get_flight_count(db_path: str) -> int:
     """Get total flight count in the database."""
     conn = sqlite3.connect(db_path)
@@ -53,7 +76,7 @@ def get_flight_count(db_path: str) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Fetch new flights, store in DB, detect thermals/runways, and extract release-to-thermal data',
+        description='Fetch new flights, store in DB, detect runways, and run the first-thermal pipeline',
     )
     parser.add_argument('--from', dest='from_date', type=str,
                        help='Fetch from date (YYYY-MM-DD), default: last flight in DB')
@@ -64,9 +87,15 @@ def main():
     parser.add_argument('--db-path', default='data/flights.db',
                        help='Path to database')
     parser.add_argument('--force', '-f', action='store_true',
-                       help='Force recalculation of thermals, runways, and release-to-thermal for all flights')
+                       help='Force recalculation of runways and climb detection for all flights')
     parser.add_argument('--skip-models', action='store_true',
-                       help='Do not rebuild the first-thermal pipeline (step 7)')
+                       help='Do not run the first-thermal pipeline (step 5)')
+    parser.add_argument('--publish-pack', default=os.environ.get('ZWEEF_PACK_URI'),
+                       help='gs://bucket/prefix: upload the briefing history pack afterwards (env ZWEEF_PACK_URI)')
+    parser.add_argument('--me', default=os.environ.get('ZWEEF_ME'),
+                       help='your logbook name for the "you" layer in the pack (env ZWEEF_ME)')
+    parser.add_argument('--gcloud-account', default=os.environ.get('ZWEEF_GCLOUD_ACCOUNT'),
+                       help='gcloud account for the upload (env ZWEEF_GCLOUD_ACCOUNT)')
     args = parser.parse_args()
 
     db_path = args.db_path
@@ -121,6 +150,13 @@ def main():
         print("STEP 2: Storing flights in database")
         print("-"*60 + "\n")
 
+        # Days in the fetch range were downloaded again into the same folders (date_dagid);
+        # re-open them so flights added to those days since the last run are stored too.
+        # Storing skips flights that are already in the database.
+        reopened = reopen_folders(db_path, fetch_from, fetch_to)
+        if reopened:
+            print(f"  Re-checking {reopened} day folder(s) in {fetch_from} → {fetch_to} for new flights\n")
+
         result = subprocess.run([
             '.venv/bin/python', 'src/data_collection/store_icg_data.py',
             '--db-path', db_path,
@@ -131,25 +167,9 @@ def main():
         else:
             print("\n✓ Store complete\n")
 
-    # Step 3: Thermal detection (auto-skips if nothing changed)
+    # Step 3: Runway detection (before the climb detector, which copies the runway)
     print("-"*60)
-    print("STEP 3: Thermal detection")
-    print("-"*60 + "\n")
-
-    thermal_cmd = [
-        '.venv/bin/python', 'src/thermal_detection/FindThermals_improved.py',
-        '--yes', '--db-path', db_path,
-    ]
-    if args.force:
-        thermal_cmd.append('--force')
-
-    result = subprocess.run(thermal_cmd)
-    if result.returncode != 0:
-        print(f"\nWARNING: Thermal detection failed (exit code {result.returncode})\n")
-
-    # Step 4: Runway detection
-    print("-"*60)
-    print("STEP 4: Runway detection")
+    print("STEP 3: Runway detection")
     print("-"*60 + "\n")
 
     runway_cmd = [
@@ -163,25 +183,9 @@ def main():
     if result.returncode != 0:
         print(f"\nWARNING: Runway detection failed (exit code {result.returncode})\n")
 
-    # Step 5: Release-to-thermal extraction
+    # Step 4: Update weather data for date range
     print("-"*60)
-    print("STEP 5: Release-to-thermal extraction")
-    print("-"*60 + "\n")
-
-    release_cmd = [
-        '.venv/bin/python', 'src/data_collection/extract_release_thermal.py',
-        '--db-path', db_path,
-    ]
-    if args.force:
-        release_cmd.append('--force')
-
-    result = subprocess.run(release_cmd)
-    if result.returncode != 0:
-        print(f"\nWARNING: Release-to-thermal extraction failed (exit code {result.returncode})\n")
-
-    # Step 6: Update weather data for date range
-    print("-"*60)
-    print("STEP 6: Update weather data")
+    print("STEP 4: Update weather data")
     print("-"*60 + "\n")
 
     weather_cmd = [
@@ -197,10 +201,10 @@ def main():
     else:
         print("\n✓ Weather data updated\n")
 
-    # Step 7: First-thermal pipeline (convection weather, climb detector, layers A/B/C)
+    # Step 5: First-thermal pipeline (convection weather, climb detector, layers A/B/C)
     if not args.skip_models:
         print("-"*60)
-        print("STEP 7: First-thermal models (weather, climb detector, layers A/B/C)")
+        print("STEP 5: First-thermal pipeline (weather, climb detector, layers A/B/C)")
         print("-"*60 + "\n")
         ft_cmd = ['.venv/bin/python', 'scripts/train_first_thermal.py', '--db-path', db_path]
         if args.force:
@@ -210,6 +214,21 @@ def main():
             print(f"\nWARNING: First-thermal training finished with warnings (exit code {result.returncode})\n")
         else:
             print("\n✓ First-thermal models updated\n")
+
+    # Step 6: history pack for the hosted briefing
+    if args.publish_pack:
+        print("-"*60)
+        print("STEP 6: Publish the briefing history pack")
+        print("-"*60 + "\n")
+        pack_cmd = ['.venv/bin/python', 'scripts/publish_briefing_pack.py', '--db-path', db_path,
+                    '--uri', args.publish_pack]
+        if args.me:
+            pack_cmd += ['--me', args.me]
+        if args.gcloud_account:
+            pack_cmd += ['--account', args.gcloud_account]
+        result = subprocess.run(pack_cmd)
+        if result.returncode != 0:
+            print(f"\nWARNING: Publishing the pack failed (exit code {result.returncode})\n")
 
     # Summary
     flights_after = get_flight_count(db_path)

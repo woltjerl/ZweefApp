@@ -29,6 +29,10 @@ from datetime import datetime
 from typing import Optional, Tuple
 import pandas as pd
 import folium
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '.'))
+from basemap import make_map  # noqa: E402  (keyless PDOK base map)
 from folium.plugins import HeatMap
 
 # Add path for runway constants
@@ -198,7 +202,7 @@ def create_improved_heatmap(
     Create enhanced heatmap with markers and statistics.
     """
     # Create map
-    m = folium.Map(location=[EHHV_LAT, EHHV_LON], zoom_start=13)
+    m = make_map(location=[EHHV_LAT, EHHV_LON], zoom_start=13)
 
     # Add heatmap
     heat_data = df[['latitude', 'longitude', 'vertical_speed']].values.tolist()

@@ -425,7 +425,15 @@ if __name__ == "__main__":
     parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation prompt')
     parser.add_argument('--force', '-f', action='store_true', help='Force re-run even if nothing changed')
     parser.add_argument('--db-path', default='data/flights.db', help='Path to database')
+    parser.add_argument('--legacy-overwrite', action='store_true',
+                        help='overwrite the climb-detector labels with this old detector')
     args = parser.parse_args()
+
+    if not args.legacy_overwrite:
+        print("This old detector is superseded by src/thermal_detection/climb_detector.py, which also\n"
+              "writes these columns (via sync_legacy_columns). Running it would overwrite the corrected\n"
+              "labels with the old ones. Use --legacy-overwrite if you really want that.")
+        exit(1)
 
     finder = FindThermalsImproved(db_path=args.db_path)
 

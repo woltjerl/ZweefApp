@@ -590,6 +590,15 @@ def run(db_path, force=False, flight_ids=None, verbose=True):
         done = set()
     else:
         done = {r[0] for r in conn.execute("SELECT flight_id FROM launches")}
+        # flights stored without a track whose logger file has arrived since: process again
+        no_track = {r[0] for r in conn.execute("SELECT flight_id FROM launches WHERE track_status = 'no_track'")}
+        if no_track:
+            ids = ','.join(str(int(i)) for i in no_track)
+            arrived = {r[0] for r in conn.execute(
+                f"SELECT DISTINCT flight_id FROM igc_data WHERE flight_id IN ({ids})")}
+            if arrived and verbose:
+                print(f"{len(arrived)} flight(s) now have a logger track: processing them again")
+            done -= arrived
 
     flights = pd.read_sql_query("""
         SELECT id, datum, start_tijd, start_methode, registratie, type, uuid, sleep_uuid, runway,

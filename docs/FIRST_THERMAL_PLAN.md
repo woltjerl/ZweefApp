@@ -749,13 +749,13 @@ days by date (2026-04-18 → 2026-11-04, 91 days), never used for tuning.
 | Phase | Files |
 |---|---|
 | Config | `src/config.py` |
-| 1 Detector, audit | `src/thermal_detection/climb_detector.py`, `scripts/audit_labels.py`, `data/label_audit.csv` |
+| 1 Detector, audit | `src/thermal_detection/climb_detector.py`, `scripts/audit_labels.py`, `data/label_audit.csv`, `src/thermal_detection/sync_legacy_columns.py` (writes the results into the old columns) |
 | 2 Weather | `scripts/backfill_convection_weather.py` (table `weather_conv`), `src/weather/open_meteo_forecast.py`, `src/prediction/features.py` |
 | 3 Models | `src/prediction/layer_a.py`, `reach.py`, `layer_b.py`, `layer_c.py`, `routes.py`, `dataset.py` |
 | 4 Evaluation | `src/prediction/evaluation.py`, `scripts/evaluate_prediction.py` (`--tune`, `--prospective`) |
 | 5 Display | `src/prediction/first_thermal_map.py`, `scripts/daily_forecast.py` (`--legacy` keeps the old maps) |
 | Pipeline | `scripts/train_first_thermal.py`, step 7 in `scripts/update_flights.py` |
-| Tests | `tests/` — 31 tests (detector on synthetic flights, features, reach, layer B maths, statistics, routes) |
+| Tests | `tests/` — 33 tests (detector on synthetic flights, features, reach, layer B maths, statistics, routes, label sync) |
 
 ## 19.2 Deviations from the plan, and why
 
@@ -801,7 +801,15 @@ days by date (2026-04-18 → 2026-11-04, 91 days), never used for tuning.
    70% of days only; the direction rule (τ, method) was also chosen on those days.
    Tuning result: drift correction **off** (concordance 0.369 → 0.300), 150 m cells,
    300 m smoothing, K = 10, M = 10, λ = 0.3, wind-direction conditioning dropped (no gain).
-10. **Disclosure.** Exploratory analyses while building looked at all days, including the
+10. **Old label columns now follow the detector** (added after the first implementation).
+    `flights.flight_outcome`, `release_*`, `thermal_entry_*`, `release_to_thermal_*` and
+    `igc_data.first_thermal` are rewritten from the climb detector after every run, so the
+    legacy maps and old ML code use the corrected labels (2,818 launches that were labelled
+    `thermal_found` without a real climb are now `landed_back`). Heights in these columns are
+    now above the field (AGL). The old values are kept in `legacy_labels_backup` /
+    `legacy_first_thermal_backup`; `update_flights.py` no longer runs the old detectors, and
+    those refuse to run without `--legacy-overwrite`.
+11. **Disclosure.** Exploratory analyses while building looked at all days, including the
     test days, so the test set is not fully pristine. The forecast log
     (`data/forecast_log.jsonl`, scored with `--prospective`) is the untouched check.
 
