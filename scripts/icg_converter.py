@@ -112,8 +112,8 @@ def build_strava_gpx(fixes, name):
 
 if __name__ == '__main__':
     # Hard‑coded paths:
-    IN_PATH  = "/Users/woltjerl/Downloads/2025-09-06-XNA-5ED620345C53.igc"
-    OUT_PATH = "/Users/woltjerl/Downloads/2025-09-06-XNA-5ED620345C53_strava.gpx"
+    IN_PATH  = "/Users/woltjerl/Downloads/edpa.igc"
+    OUT_PATH = "/Users/woltjerl/Downloads/edpa_strava.gpx"
 
     fixes = parse_igc(IN_PATH)
     if not fixes:
