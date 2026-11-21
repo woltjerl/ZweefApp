@@ -1,230 +1,94 @@
-# ZweefApp - Advanced Thermal Prediction for Gliding
+# ZweefApp — first thermal after a winch launch at EHHV
 
-Terrain-aware thermal prediction system for Hilversum Airport (EHHV) that tells you exactly where to find lift after winch launch.
+Uses ~9,000 logged winch launches from Hilversum (EHHV) to answer three questions for a
+given day, hour and runway:
 
-## 🎯 Features
+1. **When:** what is the chance of connecting with a thermal after release? (layer A)
+2. **Where:** within reach of the low release, which places have converted into a climb
+   most often when searched, in similar wind and season? (layer B)
+3. **Who:** do the club's best thermal pilots go somewhere different, and does it help
+   others to follow them? (layer C)
 
-- **87% confidence thermal predictions** based on weather and terrain
-- **OpenStreetMap terrain integration** (forests, urban areas, water)
-- **Downwind thermal trigger detection** (physics-based predictions)
-- **Interactive maps** with color-coded confidence levels
-- **Historical data analysis** (180k+ thermal data points)
-- **Weather integration** (wind, temperature, time-of-day matching)
+Every claim the forecast page makes is backed by a prediction-power report computed on
+days the model never saw. See `docs/FIRST_THERMAL_PLAN.md` for the design and the
+results, and `output/prediction_power_report.html` for the latest numbers.
 
-## 📁 Project Structure
+## What it can and cannot tell you (held-out test days, Apr–Nov 2026)
 
-```
-ZweefApp/
-├── src/                              # Source code
-│   ├── data_collection/             # IGC file downloading and processing
-│   ├── thermal_detection/           # Thermal detection algorithms
-│   ├── weather/                     # Weather data fetching
-│   ├── prediction/                  # Thermal prediction (basic + advanced)
-│   └── visualization/               # Data visualization scripts
-│
-├── data/                            # Data files (database, IGC files)
-├── output/                          # Generated maps and visualizations
-├── logs/                            # Application logs
-├── docs/                            # Documentation
-├── scripts/                         # Helper scripts
-└── backups/                         # Old backup files
-```
+| | Result |
+|---|---|
+| Chance to connect this hour | AUC 0.78, well calibrated (predicted low/middle/high tercile: observed 1.5% / 9.8% / 25.4%) |
+| Which reachable places convert when searched | thermal in the map's best third of the cells you search 63.5% of the time (chance 33%) |
+| One "turn this way after release" instruction | no reliable effect (RR 1.14, 0.66–1.88) |
+| Do the aces know a secret spot? | aces connect 1.6× expected, but others following their route gain nothing: it is skill |
 
-## 🚀 Quick Start
+So the page shows the chance, the rate map with sample counts, where first thermals are
+usually found and the reach — not ranked "fly here" lines (plan 4.6 not passed).
 
-### First-Time Setup (25 minutes)
+## Daily use
 
 ```bash
-# 1. Install dependencies
-pip install -r requirements.txt
+# tomorrow, 12–15 h local, runway from the forecast wind
+.venv/bin/python scripts/daily_forecast.py
+open output/first_thermal_<date>_midday.html
 
-# 2. Configure API credentials
-cp .env.example .env
-# Edit .env with your GlidingApp credentials
-
-# 3. Download IGC files
-python src/data_collection/fetch_igc_files.py
-
-# 4. Process IGC files into database
-python src/data_collection/store_icg_data.py
-
-# 5. Set up advanced thermal prediction
-./scripts/setup_thermal_prediction.sh
+# other windows / runway / glider class
+.venv/bin/python scripts/daily_forecast.py morning --runway 25 --glider two_seat
+.venv/bin/python scripts/daily_forecast.py --date 2026-05-02 afternoon
+.venv/bin/python scripts/daily_forecast.py --all-runways
 ```
 
-### Daily Use (30 seconds)
+The page shows: the chance to connect (and how often past launches with a similar
+forecast actually connected), hourly chances, the reach from today's release with
+circuit height left, the per-cell connect rate for today's conditions with sample counts,
+where first thermals are usually found from this runway in this wind, the history of
+initial directions, and the typical early routes of the best pilots. Ranked "fly here"
+lines are only drawn when the evaluation accepted them (`data/models/acceptance.json`).
+Each forecast is appended to `data/forecast_log.jsonl` for a prospective check.
+
+## Updating
 
 ```bash
-# Get tomorrow's thermal prediction
-python src/prediction/thermal_predictor_advanced.py
-
-# Open the generated map
-open output/thermal_prediction_advanced.html
+.venv/bin/python scripts/update_flights.py          # fetch new flights, then retrain (step 7)
+.venv/bin/python scripts/train_first_thermal.py     # only retrain
+.venv/bin/python scripts/evaluate_prediction.py     # regenerate the prediction-power report
+.venv/bin/python scripts/evaluate_prediction.py --tune         # re-tune (first 70% of days only)
+.venv/bin/python scripts/evaluate_prediction.py --prospective  # score logged forecasts
 ```
 
-## 📖 Documentation
+## Pipeline
 
-- **[Quick Start Guide](docs/QUICK_START.md)** - Get started in minutes
-- **[Thermal Prediction Setup](docs/THERMAL_PREDICTION_SETUP.md)** - Full setup guide
-- **[Fetch IGC Files](docs/README_FETCH_IGC.md)** - Download flight data
-- **[Implementation Summary](docs/IMPLEMENTATION_SUMMARY.md)** - Technical details
-- **[Improvements Summary](docs/COMPREHENSIVE_IMPROVEMENTS_SUMMARY.md)** - Recent changes
+| Step | Module | Output |
+|---|---|---|
+| Convection weather history (Open-Meteo historical forecast) | `scripts/backfill_convection_weather.py` | table `weather_conv` |
+| Launch and climb detection (winch, aerotow with tug pairing, self-launch) | `src/thermal_detection/climb_detector.py` | tables `launches`, `climbs`, `search_tracks` |
+| Label audit | `scripts/audit_labels.py` | `data/label_audit.csv` |
+| Layer A: chance to connect | `src/prediction/layer_a.py` | `launches.pA`, `data/models/layer_a.pkl` |
+| Reach | `src/prediction/reach.py` | used by B and the page |
+| Layer B: per-cell rates, direction history | `src/prediction/layer_b.py` | `data/models/layer_b.pkl` |
+| Layer C: pilot skill, early routes | `src/prediction/layer_c.py` | `data/models/layer_c.pkl` |
+| Recommended lines | `src/prediction/routes.py` | page (only if accepted) |
+| Evaluation | `scripts/evaluate_prediction.py`, `src/prediction/evaluation.py` | report, `acceptance.json` |
+| Forecast page | `src/prediction/first_thermal_map.py`, `scripts/daily_forecast.py` | `output/first_thermal_*.html` |
 
-## 🎓 How It Works
+All tunable constants are in `src/config.py`. Tests: `.venv/bin/python -m pytest tests/`.
 
-### Data Collection
-1. **fetch_igc_files.py** - Downloads IGC files from GlidingApp API
-2. **store_icg_data.py** - Parses IGC files and stores in SQLite database
-3. **HilversumWeatherFetcher.py** - Fetches weather data from Meteostat
+## Data collection
 
-### Thermal Detection
-1. **FindThermals_improved.py** - Detects first thermal after winch release
-2. **terrain_enrichment.py** - Adds terrain features from OpenStreetMap
-3. Marks all thermal points at winch-reachable altitude (<600m)
-
-### Prediction
-1. **thermal_predictor_advanced.py** - Terrain-aware predictions
-   - Wind similarity (35% weight)
-   - Terrain context (30% weight) - forest edges, downwind effects
-   - Temperature matching (20% weight)
-   - Time of day (10% weight)
-   - Historical climb rate (5% weight)
-
-### Output
-- Interactive Folium map with heatmap overlay
-- Top 10 hotspots color-coded by confidence
-- Detailed reasoning for each recommendation
-- Flight strategy (bearing, distance, terrain type)
-
-## 🎯 Example Prediction
-
-```
-🎯 HOTSPOT #1 - 87% CONFIDENCE
-   Bearing: 279° (W) from EHHV
-   Distance: 0.7 km
-   Expected climb: 2.3 m/s
-   Terrain: forest_edge
-
-   Why this spot:
-     • Wind match: 95% (dir ±5°, speed ±1.2 km/h)
-     • Terrain: Forest edge, Downwind of forest (80% bonus)
-     • Temperature match: 85% (±1.8°C)
-
-📍 After winch release (~400m):
-   1. Turn toward W (279°)
-   2. Fly 0.7 km
-   3. Search forest_edge area
-```
-
-## 🛠️ Main Scripts
-
-### Data Collection
 ```bash
-# Download IGC files from API
-python src/data_collection/fetch_igc_files.py --verbose
-
-# Process IGC files into database
-python src/data_collection/store_icg_data.py --verbose
-
-# Resume interrupted processing
-python src/data_collection/store_icg_data.py --resume
+cp .env.example .env            # GlidingApp credentials
+.venv/bin/python src/data_collection/fetch_igc_files.py
+.venv/bin/python src/data_collection/store_icg_data.py
 ```
 
-### Thermal Detection
-```bash
-# Detect thermals (one-time setup)
-python src/thermal_detection/FindThermals_improved.py
+## Legacy
 
-# Add terrain features (one-time setup)
-python src/prediction/terrain_enrichment.py
-```
+The earlier heatmaps and terrain-scored predictors (`thermal_predictor_advanced.py`,
+`ml_thermal_predictor.py`, `FindThermals_improved.py`, …) are still available via
+`scripts/daily_forecast.py --legacy`. Their "confidence" numbers were similarity scores,
+not probabilities; see the plan document for why they were replaced.
 
-### Prediction
-```bash
-# Advanced prediction (recommended)
-python src/prediction/thermal_predictor_advanced.py
+## Safety
 
-# Basic prediction
-python src/prediction/thermal_forecast.py
-
-# Different time windows
-python src/prediction/thermal_predictor_advanced.py --time-window morning
-python src/prediction/thermal_predictor_advanced.py --time-window afternoon
-```
-
-### Visualization
-```bash
-# Generate various heatmaps
-python src/visualization/plot_data.py
-python src/visualization/plot_data2.py
-python src/visualization/plot_data3.py
-```
-
-## 📊 Database Schema
-
-**flights** - Flight metadata from GlidingApp
-**igc_data** - GPS fixes with weather and terrain data
-**weather_data** - Cached weather data from Meteostat
-**processing_log** - Track processed folders for resume capability
-
-### Key Fields in igc_data
-- `first_thermal` - Boolean flag for thermal points
-- `wind_dir`, `wind_spd` - Wind conditions at each fix
-- `weather_temp`, `weather_dwpt` - Temperature and dew point
-- `distance_to_forest`, `distance_to_water`, `distance_to_urban` - Terrain features
-- `terrain_type` - Classification (forest_edge, field, urban_edge, etc.)
-
-## 🔧 Configuration
-
-### Environment Variables (.env)
-```bash
-GLIDING_APP_EMAIL=your_email@example.com
-GLIDING_APP_PASSWORD=your_password
-```
-
-### Database Location
-Default: `data/flights.db`
-Override: `--db-path <path>`
-
-### IGC Files Location
-Default: `data/icg_files/`
-Override: `--input-dir <path>`
-
-## 📈 Accuracy
-
-- **Basic prediction** (wind only): ~60% accuracy
-- **Advanced prediction** (terrain + weather): ~85% accuracy
-- Based on 180,000+ historical thermal points
-- Validated across 5,000+ flights
-
-## 🛡️ Safety Notice
-
-⚠️ **Important:**
-- Always stay within gliding range until first thermal
-- Predictions are probabilities, not guarantees
-- Weather can change - verify actual conditions
-- Have backup plans (multiple hotspots)
-- Never fly below safe altitude searching for thermals
-
-## 🤝 Contributing
-
-This is a personal project for Hilversum Airport gliding operations.
-
-## 📝 License
-
-Private project - not licensed for public use.
-
-## 🙏 Acknowledgments
-
-- **GlidingApp** - Flight data API
-- **Meteostat** - Weather data
-- **OpenStreetMap** - Terrain features
-- **Folium** - Interactive maps
-
-## 📧 Contact
-
-For questions about gliding at Hilversum Airport (EHHV).
-
----
-
-**Ready to fly?** Follow the [Quick Start Guide](docs/QUICK_START.md) to get started! 🪂
+Probabilities, not guarantees. Reach uses a still-air glide; real pilots lose height
+faster while searching, so heights on the map are optimistic. Always keep circuit height.

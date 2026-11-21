@@ -2,8 +2,7 @@
 pandas>=2.0.0
 numpy>=1.24.0
 
-# Database
-sqlite3  # Built-in with Python
+# Database: sqlite3 is part of the Python standard library
 
 # Weather data
 meteostat>=1.6.0
@@ -19,9 +18,13 @@ matplotlib>=3.7.0
 # Progress bars
 tqdm>=4.65.0
 
+# First-thermal models (layers A/B/C, evaluation)
+scikit-learn>=1.4
+scipy>=1.11
+
 # IGC file parsing (if needed)
 # aerofiles>=1.0.0
 
 # Development
-# pytest>=7.3.0
+pytest>=7.3.0
 # black>=23.0.0

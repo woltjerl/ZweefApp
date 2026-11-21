@@ -10,6 +10,8 @@ and runs all processing steps:
   4. Runway detection (from GPS takeoff track)
   5. Release-to-thermal extraction (bearing, distance, time from release to thermal)
   6. Weather data update (fetches weather for date range, even if no flights)
+  7. First-thermal pipeline: convection weather, climb detector, layers A/B/C
+     (scripts/train_first_thermal.py; skip with --skip-models)
 
 By default, steps 3-5 only process new/unprocessed flights.
 Use --force to recalculate all flights.
@@ -63,6 +65,8 @@ def main():
                        help='Path to database')
     parser.add_argument('--force', '-f', action='store_true',
                        help='Force recalculation of thermals, runways, and release-to-thermal for all flights')
+    parser.add_argument('--skip-models', action='store_true',
+                       help='Do not rebuild the first-thermal pipeline (step 7)')
     args = parser.parse_args()
 
     db_path = args.db_path
@@ -192,6 +196,20 @@ def main():
         print(f"\nWARNING: Weather update failed (exit code {result.returncode})\n")
     else:
         print("\n✓ Weather data updated\n")
+
+    # Step 7: First-thermal pipeline (convection weather, climb detector, layers A/B/C)
+    if not args.skip_models:
+        print("-"*60)
+        print("STEP 7: First-thermal models (weather, climb detector, layers A/B/C)")
+        print("-"*60 + "\n")
+        ft_cmd = ['.venv/bin/python', 'scripts/train_first_thermal.py', '--db-path', db_path]
+        if args.force:
+            ft_cmd.append('--force-detector')
+        result = subprocess.run(ft_cmd)
+        if result.returncode != 0:
+            print(f"\nWARNING: First-thermal training finished with warnings (exit code {result.returncode})\n")
+        else:
+            print("\n✓ First-thermal models updated\n")
 
     # Summary
     flights_after = get_flight_count(db_path)

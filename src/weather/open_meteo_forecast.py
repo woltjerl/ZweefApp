@@ -58,6 +58,77 @@ def fetch_open_meteo_hourly(target_date: date) -> List[Dict]:
     return records
 
 
+# ── Convection variables (first-thermal pipeline) ──
+# Same variables for history (historical-forecast API) and prediction (forecast API),
+# so the model is trained on the same kind of data it is later fed.
+CONVECTION_VARS = {
+    'boundary_layer_height': 'blh',
+    'cape': 'cape',
+    'sensible_heat_flux': 'shf',
+    'shortwave_radiation': 'sw',
+    'direct_radiation': 'direct',
+    'cloud_cover_low': 'cl_low',
+    'cloud_cover_mid': 'cl_mid',
+    'temperature_2m': 't2m',
+    'dew_point_2m': 'td2m',
+    'wind_speed_100m': 'ws100',
+    'wind_direction_100m': 'wd100',
+    'wind_speed_10m': 'ws10',
+    'wind_direction_10m': 'wd10',
+    'precipitation': 'precip',
+    'soil_moisture_0_to_1cm': 'soil',
+}
+CONVECTION_COLUMNS = list(CONVECTION_VARS.values())
+
+ENDPOINTS = {
+    'forecast': 'https://api.open-meteo.com/v1/forecast',
+    'historical_forecast': 'https://historical-forecast-api.open-meteo.com/v1/forecast',
+    'archive': 'https://archive-api.open-meteo.com/v1/archive',
+}
+
+
+def fetch_convection(endpoint: str, start_date: Optional[date] = None, end_date: Optional[date] = None,
+                     variables: Optional[Dict[str, str]] = None, past_days: int = 0,
+                     forecast_days: int = 7, timeout: int = 120) -> List[Dict]:
+    """
+    Fetch hourly convection variables (UTC) from an Open-Meteo endpoint.
+
+    Returns a list of dicts: {'date': 'YYYY-MM-DD', 'hour_utc': int, <short names>...}.
+    """
+    variables = variables or CONVECTION_VARS
+    params = {
+        'latitude': EHHV_LAT,
+        'longitude': EHHV_LON,
+        'hourly': ','.join(variables.keys()),
+        'timezone': 'UTC',
+    }
+    if start_date is not None:
+        params['start_date'] = str(start_date)
+        params['end_date'] = str(end_date or start_date)
+    else:
+        params['forecast_days'] = forecast_days
+        if past_days:
+            params['past_days'] = past_days
+
+    resp = requests.get(ENDPOINTS[endpoint], params=params, timeout=timeout)
+    resp.raise_for_status()
+    hourly = resp.json()['hourly']
+
+    rows = []
+    for i, ts in enumerate(hourly['time']):
+        row = {'date': ts[:10], 'hour_utc': int(ts[11:13])}
+        for api_name, short in variables.items():
+            vals = hourly.get(api_name)
+            row[short] = vals[i] if vals is not None else None
+        rows.append(row)
+    return rows
+
+
+def fetch_convection_forecast(past_days: int = 3, forecast_days: int = 7) -> List[Dict]:
+    """Convection variables for the coming days (plus a few past days for rain history)."""
+    return fetch_convection('forecast', past_days=past_days, forecast_days=forecast_days, timeout=30)
+
+
 def get_forecast_for_window(target_date: date, time_window: str) -> Optional[Dict]:
     """
     Get averaged forecast for a specific date and time window.

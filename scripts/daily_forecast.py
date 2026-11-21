@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-Daily Thermal Forecast Generator
+Daily First-Thermal Forecast (docs/FIRST_THERMAL_PLAN.md, section 16)
 
-Automatically generates thermal predictions for tomorrow:
-1. Advanced terrain-aware prediction (physics + terrain)
-2. Historical heatmap (statistical density)
-3. Wind-filtered heatmap (matching tomorrow's forecast)
+For a date and time window: chance to connect after a winch launch (layer A),
+reach from today's release, per-cell connect rates for today's conditions
+(layer B), direction history and ace routes (layer C), and — only when the
+evaluation accepted them — recommended search lines. Writes
+output/first_thermal_<date>_<window>.html and logs the forecast to
+data/forecast_log.jsonl for the prospective check.
 
 Usage:
-    python daily_forecast.py
-    python daily_forecast.py morning
-    python daily_forecast.py afternoon
-    python daily_forecast.py --date 2026-03-30
+    python scripts/daily_forecast.py
+    python scripts/daily_forecast.py morning --runway 25 --glider two_seat
+    python scripts/daily_forecast.py --date 2026-03-30 afternoon
+    python scripts/daily_forecast.py --all-runways
+    python scripts/daily_forecast.py --legacy        # the old heatmaps
 """
 
 import sys
@@ -290,11 +293,13 @@ def print_summary(target_date: date, time_window: str, forecast: dict, runway: s
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='Generate daily thermal forecast for tomorrow',
+        description='First-thermal forecast for winch launches at EHHV',
         epilog='Examples:\n'
-               '  python daily_forecast.py\n'
-               '  python daily_forecast.py morning\n'
-               '  python daily_forecast.py --date 2026-03-30 --time-window afternoon\n',
+               '  python scripts/daily_forecast.py\n'
+               '  python scripts/daily_forecast.py morning --runway 25\n'
+               '  python scripts/daily_forecast.py --date 2026-03-30 afternoon --glider two_seat\n'
+               '  python scripts/daily_forecast.py --all-runways\n'
+               '  python scripts/daily_forecast.py --legacy      # old heatmaps (before the new pipeline)\n',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -304,12 +309,60 @@ def parse_arguments():
                        help='Time window (default: midday)')
     parser.add_argument('--date', type=str,
                        help='Target date (YYYY-MM-DD), default: tomorrow')
+    parser.add_argument('--runway', choices=['07', '12', '18', '25', '30', '36'],
+                       help='Runway in use (default: from the forecast surface wind)')
+    parser.add_argument('--glider', choices=['single', 'two_seat'], default='single',
+                       help='Glider class for reach and connect chance (default: single)')
+    parser.add_argument('--dual', action='store_true', help='Flying with an instructor/second pilot')
+    parser.add_argument('--all-runways', action='store_true', help='Produce a page for each of the six runways')
+    parser.add_argument('--no-log', action='store_true', help='Do not append to the forecast log')
+    parser.add_argument('--legacy', action='store_true',
+                       help='Generate the old heatmaps instead (scripts are kept until the new model is accepted)')
     parser.add_argument('--include-all', action='store_true',
-                       help='Include all-conditions heatmap (not wind-filtered)')
+                       help='(legacy) Include all-conditions heatmap (not wind-filtered)')
     parser.add_argument('--output-suffix', default='',
                        help='Suffix for output filenames')
 
     return parser.parse_args()
+
+
+def run_first_thermal(target_date, args):
+    """New pipeline: layer A + reach + layer B + layer C → output/first_thermal_<date>_<window>[_rwy].html"""
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from src.prediction.dataset import connect
+    from src.prediction.first_thermal_map import build_forecast, log_forecast, render_map
+    from src.weather.open_meteo_forecast import fetch_convection_forecast
+
+    conn = connect()
+    rows = fetch_convection_forecast(past_days=3, forecast_days=8)
+    runways = ['07', '12', '18', '25', '30', '36'] if args.all_runways else [args.runway]
+    outputs = []
+    for rw in runways:
+        fc = build_forecast(conn, target_date, args.time_window, rw, args.glider, int(args.dual), weather_rows=rows)
+        suffix = f"_{fc['runway']}" if args.all_runways else ''
+        out = f"output/first_thermal_{target_date}_{args.time_window}{suffix}{args.output_suffix}.html"
+        os.makedirs('output', exist_ok=True)
+        render_map(fc, out)
+        if not args.no_log and not args.all_runways:
+            log_forecast(fc)
+        h = fc['pA_history']
+        print(f"\n{target_date} {args.time_window} · runway {fc['runway']} · {args.glider}")
+        print(f"  Wind 100 m {fc['weather']['w100_dir']:.0f}° {fc['weather']['w100_spd']:.0f} km/h, "
+              f"boundary layer {fc['weather']['blh']:.0f} m, cloud base ≈ {fc['weather']['cloudbase']:.0f} m")
+        print(f"  Chance to connect: {100 * fc['pA']:.0f}%  (club average {100 * h['club_rate']:.0f}%; "
+              f"similar past forecasts {100 * h['observed']:.0f}%, n={h['n']})")
+        d = fc['direction']
+        names = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+        note = '' if fc['acceptance'].get('decision') == 'full' else ' — history only, not validated as advice'
+        print(f"  Best direction historically ({d['tau']} s after release): {names[d['best']]} "
+              f"(obs/exp {d['oe'][d['best']]:.2f}, {d['n'][d['best']]} launches){note}")
+        print(f"  Data: {fc['coverage']['launches']} launches, {fc['coverage']['connects']} connected "
+              f"({fc['coverage']['verdict']}); model status: {fc['acceptance'].get('decision')}")
+        for k, ln in enumerate(fc['lines']):
+            print(f"  Line {k + 1}: {100 * ln['p']:.0f}% ({100 * ln['p_lo']:.0f}–{100 * ln['p_hi']:.0f}%)")
+        print(f"  ✓ {out}")
+        outputs.append(out)
+    return outputs
 
 
 def main():
@@ -326,6 +379,17 @@ def main():
             return 1
     else:
         target_date = date.today() + timedelta(days=1)
+
+    if not args.legacy:
+        try:
+            run_first_thermal(target_date, args)
+        except FileNotFoundError as e:
+            print(f"ERROR: model files missing ({e}). Run: .venv/bin/python scripts/train_first_thermal.py")
+            return 1
+        except ValueError as e:
+            print(f"ERROR: {e}")
+            return 1
+        return 0
 
     print("="*60)
     print("DAILY THERMAL FORECAST GENERATOR")
